@@ -1,0 +1,16 @@
+idf_component_register(
+    SRCS
+        "app_main.c"
+        "board_config.c"
+        "soil_sensors.c"
+        "pump_control.c"
+        "watering_logic.c"
+        "zigbee_resources.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        driver
+        esp_adc
+        esp_timer
+        nvs_flash
+)
