@@ -1,0 +1,18 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.openOcdConfigs": [
+    "board/esp32h2-builtin.cfg"
+  ],
+  "idf.port": "/dev/tty.usbmodem101",
+  "idf.currentSetup": "/Users/david/.espressif/v6.0-beta2/esp-idf",
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32h2"
+  },
+  "clangd.path": "/Users/david/.espressif/tools/esp-clang/esp-20.1.1_20250829/esp-clang/bin/clangd",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=/Users/david/workspace/github.com/davidhonig/esp32/ha_on_off_light/HA_on_off_light/build"
+  ],
+  "idf.flashType": "JTAG"
+}
