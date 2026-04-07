@@ -1,16 +1,7 @@
+cmake_minimum_required(VERSION 3.16)
+
 idf_component_register(
-    SRCS
-        "app_main.c"
-        "board_config.c"
-        "soil_sensors.c"
-        "pump_control.c"
-        "watering_logic.c"
-        "zigbee_resources.c"
-    INCLUDE_DIRS
-        "include"
-    REQUIRES
-        driver
-        esp_adc
-        esp_timer
-        nvs_flash
+    SRCS "auto_watering_main.c" "moisture_sensor.c" "pump_driver.c"
+    INCLUDE_DIRS "."
+    PRIV_REQUIRES nvs_flash ieee802154 esp_adc driver
 )
