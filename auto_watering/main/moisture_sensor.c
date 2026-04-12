@@ -1,6 +1,7 @@
 #include "moisture_sensor.h"
 #include "auto_watering.h"
 #include "esp_adc/adc_oneshot.h"
+#include "esp_check.h"
 #include "esp_log.h"
 
 static const char *TAG = "MOISTURE_SENSOR";
