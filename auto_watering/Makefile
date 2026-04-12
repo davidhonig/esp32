@@ -44,11 +44,12 @@ idf-shell:
 	@bash --init-file <(echo ". '$(IDF_ACTIVATE)'")
 
 # ── Build ──────────────────────────────────────────────────────────────────
-# Auto-set the chip target when sdkconfig is absent (fresh clone / fullclean).
+# Auto-regenerate sdkconfig when it is absent or incompatible with this Zigbee project.
 .PHONY: build
 build:
-	@if [ ! -f sdkconfig ]; then \
-	    echo "No sdkconfig found – running set-target $(TARGET) first..."; \
+	@if [ ! -f sdkconfig ] || ! grep -q '^CONFIG_PARTITION_TABLE_CUSTOM=y' sdkconfig; then \
+	    echo "Regenerating sdkconfig for $(TARGET) with Zigbee partition layout..."; \
+	    rm -f sdkconfig sdkconfig.old; \
 	    . '$(IDF_ACTIVATE)' && export IDF_TARGET=$(TARGET) && $(IDF_PY) set-target $(TARGET); \
 	fi
 	$(RUN) $(IDF_PY) build
@@ -100,6 +101,7 @@ clean:
 .PHONY: fullclean
 fullclean:
 	$(RUN) $(IDF_PY) fullclean
+	rm -f sdkconfig sdkconfig.old
 
 # ── Help ───────────────────────────────────────────────────────────────────
 .PHONY: help
