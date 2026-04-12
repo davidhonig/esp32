@@ -14,9 +14,9 @@ SHELL := /bin/bash
 # ── IDF activation script ──────────────────────────────────────────────────
 IDF_ACTIVATE := /Users/david/.espressif/tools/activate_idf_v5.5.3.sh
 
-# Every recipe line is run as: bash -c ". IDF_ACTIVATE && <command>"
-# The 'define' block lets us write it once and reuse it.
-RUN := . '$(IDF_ACTIVATE)' &&
+# Every recipe line sources the activate script and forces the right target.
+# IDF_TARGET is exported so idf.py never picks up a stale value from the env.
+RUN := . '$(IDF_ACTIVATE)' && export IDF_TARGET=$(TARGET) &&
 
 # ── Target chip ────────────────────────────────────────────────────────────
 TARGET   ?= esp32h2
@@ -48,7 +48,7 @@ idf-shell:
 build:
 	@if [ ! -f sdkconfig ]; then \
 	    echo "No sdkconfig found – running set-target $(TARGET) first..."; \
-	    . '$(IDF_ACTIVATE)' && $(IDF_PY) set-target $(TARGET); \
+	    . '$(IDF_ACTIVATE)' && export IDF_TARGET=$(TARGET) && $(IDF_PY) set-target $(TARGET); \
 	fi
 	$(RUN) $(IDF_PY) build
 
