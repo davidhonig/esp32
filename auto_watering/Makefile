@@ -47,8 +47,10 @@ idf-shell:
 # Auto-regenerate sdkconfig when it is absent or incompatible with this Zigbee project.
 .PHONY: build
 build:
-	@if [ ! -f sdkconfig ] || ! grep -q '^CONFIG_PARTITION_TABLE_CUSTOM=y' sdkconfig; then \
-	    echo "Regenerating sdkconfig for $(TARGET) with Zigbee partition layout..."; \
+	@if [ ! -f sdkconfig ] || \
+	    ! grep -q '^CONFIG_PARTITION_TABLE_CUSTOM=y' sdkconfig || \
+	    ! grep -q '^CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y' sdkconfig; then \
+	    echo "Regenerating sdkconfig for $(TARGET) with Zigbee partition layout and 4 MB flash..."; \
 	    rm -rf build; \
 	    rm -f sdkconfig sdkconfig.old; \
 	    . '$(IDF_ACTIVATE)' && export IDF_TARGET=$(TARGET) && $(IDF_PY) set-target $(TARGET); \

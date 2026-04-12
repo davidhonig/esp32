@@ -5,6 +5,12 @@ CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
 CONFIG_PARTITION_TABLE_OFFSET=0x8000
 CONFIG_PARTITION_TABLE_MD5=y
 
+# Flash size (Waveshare ESP32-H2-Zero has 4 MB)
+# Keep image header in sync with the real chip size to avoid boot warnings.
+# CONFIG_ESPTOOLPY_FLASHSIZE_2MB is not set
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+
 # Zigbee End Device
 CONFIG_ZB_ENABLED=y
 CONFIG_ZB_ZED=y
