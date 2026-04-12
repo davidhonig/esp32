@@ -49,6 +49,7 @@ idf-shell:
 build:
 	@if [ ! -f sdkconfig ] || ! grep -q '^CONFIG_PARTITION_TABLE_CUSTOM=y' sdkconfig; then \
 	    echo "Regenerating sdkconfig for $(TARGET) with Zigbee partition layout..."; \
+	    rm -rf build; \
 	    rm -f sdkconfig sdkconfig.old; \
 	    . '$(IDF_ACTIVATE)' && export IDF_TARGET=$(TARGET) && $(IDF_PY) set-target $(TARGET); \
 	fi
@@ -57,6 +58,8 @@ build:
 # ── Set chip target (run once after clone / clean) ─────────────────────────
 .PHONY: set-target
 set-target:
+	rm -rf build
+	rm -f sdkconfig sdkconfig.old
 	$(RUN) $(IDF_PY) set-target $(TARGET)
 
 # ── Interactive config ─────────────────────────────────────────────────────
@@ -100,7 +103,8 @@ clean:
 
 .PHONY: fullclean
 fullclean:
-	$(RUN) $(IDF_PY) fullclean
+	-$(RUN) $(IDF_PY) fullclean
+	rm -rf build
 	rm -f sdkconfig sdkconfig.old
 
 # ── Help ───────────────────────────────────────────────────────────────────
