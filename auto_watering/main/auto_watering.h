@@ -42,7 +42,7 @@ extern "C" {
 #define PUMP_LEDC_FREQ_HZ   1000
 
 /* ── Sensor polling period ─────────────────────────────────────────────── */
-#define SENSOR_POLL_INTERVAL_MS  30000
+#define SENSOR_POLL_INTERVAL_MS  10000
 
 /* ── Zigbee stack helper macros (mirrors ha_on_off_light pattern) ──────── */
 #define ESP_ZB_ZED_CONFIG()                                      \
