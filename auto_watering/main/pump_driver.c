@@ -1,6 +1,7 @@
 #include "pump_driver.h"
 #include "auto_watering.h"
 #include "driver/ledc.h"
+#include "esp_check.h"
 #include "esp_log.h"
 
 static const char *TAG = "PUMP_DRIVER";
