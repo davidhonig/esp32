@@ -43,8 +43,13 @@ idf-shell:
 	@bash --init-file <(echo ". '$(IDF_ACTIVATE)'")
 
 # ── Build ──────────────────────────────────────────────────────────────────
+# Auto-set the chip target when sdkconfig is absent (fresh clone / fullclean).
 .PHONY: build
 build:
+	@if [ ! -f sdkconfig ]; then \
+	    echo "No sdkconfig found – running set-target $(TARGET) first..."; \
+	    . '$(IDF_ACTIVATE)' && $(IDF_PY) set-target $(TARGET); \
+	fi
 	$(RUN) $(IDF_PY) build
 
 # ── Set chip target (run once after clone / clean) ─────────────────────────
