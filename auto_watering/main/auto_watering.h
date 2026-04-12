@@ -26,7 +26,7 @@ extern "C" {
 #define SENSOR_2_GPIO  2   /* ADC1_CH2 */
 #define SENSOR_3_GPIO  3   /* ADC1_CH3 */
 #define SENSOR_4_GPIO  4   /* ADC1_CH4 */
-#define PUMP_GPIO      5   /* LEDC PWM output */
+#define PUMP_GPIO      10  /* LEDC PWM output */
 
 /* ── ADC channels (ESP32-H2 ADC1, GPIOx → ADC_CHANNEL_x) ─────────────── */
 #define SENSOR_ADC_CHANNEL_1  ADC_CHANNEL_1
