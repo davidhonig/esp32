@@ -13,6 +13,7 @@
 #include "esp_check.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "esp_zigbee_attribute.h"
 #include "ha/esp_zigbee_ha_standard.h"
 #include "esp_zigbee_cluster.h"
 #include "zcl/esp_zigbee_zcl_command.h"
@@ -30,6 +31,20 @@ static const char *TAG = "AUTO_WATERING";
 /* ── Forward declarations ──────────────────────────────────────────────── */
 static void add_moisture_endpoint(esp_zb_ep_list_t *ep_list, uint8_t ep_id);
 static void add_pump_endpoint(esp_zb_ep_list_t *ep_list, uint8_t ep_id);
+
+static esp_zb_attribute_list_t *create_basic_cluster(void)
+{
+    esp_zb_basic_cluster_cfg_t basic_cfg = {
+        .zcl_version = ESP_ZB_ZCL_BASIC_ZCL_VERSION_DEFAULT_VALUE,
+        .power_source = 0x01,
+    };
+    esp_zb_attribute_list_t *basic_cluster = esp_zb_basic_cluster_create(&basic_cfg);
+    ESP_ERROR_CHECK(esp_zb_basic_cluster_add_attr(
+        basic_cluster, ESP_ZB_ZCL_ATTR_BASIC_MANUFACTURER_NAME_ID, (void *)ESP_MANUFACTURER_NAME));
+    ESP_ERROR_CHECK(esp_zb_basic_cluster_add_attr(
+        basic_cluster, ESP_ZB_ZCL_ATTR_BASIC_MODEL_IDENTIFIER_ID, (void *)ESP_MODEL_IDENTIFIER));
+    return basic_cluster;
+}
 
 static void report_moisture_value(uint8_t endpoint)
 {
@@ -167,6 +182,9 @@ static esp_err_t zb_action_handler(esp_zb_core_action_callback_id_t callback_id,
     case ESP_ZB_CORE_SET_ATTR_VALUE_CB_ID:
         ret = zb_attribute_handler((const esp_zb_zcl_set_attr_value_message_t *)message);
         break;
+    case ESP_ZB_CORE_CMD_DEFAULT_RESP_CB_ID:
+        ESP_LOGD(TAG, "Received ZCL default response");
+        break;
     default:
         ESP_LOGW(TAG, "Unhandled Zigbee action callback: 0x%x", callback_id);
         break;
@@ -214,13 +232,8 @@ static void add_moisture_endpoint(esp_zb_ep_list_t *ep_list, uint8_t ep_id)
 {
     /* Cluster list ─────────────────────────────────────────────────────── */
     esp_zb_cluster_list_t *cluster_list = esp_zb_zcl_cluster_list_create();
-
-    esp_zb_basic_cluster_cfg_t basic_cfg = {
-        .zcl_version = ESP_ZB_ZCL_BASIC_ZCL_VERSION_DEFAULT_VALUE,
-        .power_source = 0x01,   /* mains power */
-    };
     esp_zb_cluster_list_add_basic_cluster(
-        cluster_list, esp_zb_basic_cluster_create(&basic_cfg),
+        cluster_list, create_basic_cluster(),
         ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
 
     esp_zb_identify_cluster_cfg_t identify_cfg = { .identify_time = 0 };
@@ -254,13 +267,8 @@ static void add_pump_endpoint(esp_zb_ep_list_t *ep_list, uint8_t ep_id)
 {
     /* Cluster list ─────────────────────────────────────────────────────── */
     esp_zb_cluster_list_t *cluster_list = esp_zb_zcl_cluster_list_create();
-
-    esp_zb_basic_cluster_cfg_t basic_cfg = {
-        .zcl_version = ESP_ZB_ZCL_BASIC_ZCL_VERSION_DEFAULT_VALUE,
-        .power_source = 0x01,
-    };
     esp_zb_cluster_list_add_basic_cluster(
-        cluster_list, esp_zb_basic_cluster_create(&basic_cfg),
+        cluster_list, create_basic_cluster(),
         ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
 
     esp_zb_identify_cluster_cfg_t identify_cfg = { .identify_time = 0 };
@@ -282,7 +290,7 @@ static void add_pump_endpoint(esp_zb_ep_list_t *ep_list, uint8_t ep_id)
     esp_zb_endpoint_config_t ep_cfg = {
         .endpoint        = ep_id,
         .app_profile_id  = ESP_ZB_AF_HA_PROFILE_ID,
-        .app_device_id   = ESP_ZB_HA_ON_OFF_OUTPUT_DEVICE_ID,
+        .app_device_id   = ESP_ZB_HA_LEVEL_CONTROLLABLE_OUTPUT_DEVICE_ID,
         .app_device_version = 0,
     };
     esp_zb_ep_list_add_ep(ep_list, cluster_list, ep_cfg);
