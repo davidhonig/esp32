@@ -1,0 +1,2 @@
+source /Users/david/workspace/github.com/davidhonig/esp32/auto_watering/build/gdbinit/symbols
+source /Users/david/workspace/github.com/davidhonig/esp32/auto_watering/build/gdbinit/connect

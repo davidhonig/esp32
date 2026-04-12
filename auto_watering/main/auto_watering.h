@@ -18,7 +18,7 @@ extern "C" {
 
 /* ── Endpoint layout ───────────────────────────────────────────────────── */
 #define NUM_SENSORS           4
-#define SENSOR_ENDPOINT_BASE  1    /* endpoints 1-4 → sensors */
+#define SENSOR_ENDPOINT_BASE  1    /* endpoints 1-4 → sensors (humidity cluster 0x0405) */
 #define PUMP_ENDPOINT         5    /* endpoint  5   → pump    */
 
 /* ── GPIO assignments ──────────────────────────────────────────────────── */

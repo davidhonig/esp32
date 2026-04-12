@@ -46,14 +46,15 @@ Each physical device is represented as a **separate Zigbee endpoint** on one nod
 
 | Endpoint | Zigbee Device Type | ZCL Cluster(s) | Physical mapping |
 |----------|--------------------|----------------|-----------------|
-| 1 | `ESP_ZB_HA_SIMPLE_SENSOR_DEVICE_ID` | `SOIL_MOISTURE` measurement | Sensor 1 |
-| 2 | `ESP_ZB_HA_SIMPLE_SENSOR_DEVICE_ID` | `SOIL_MOISTURE` measurement | Sensor 2 |
-| 3 | `ESP_ZB_HA_SIMPLE_SENSOR_DEVICE_ID` | `SOIL_MOISTURE` measurement | Sensor 3 |
-| 4 | `ESP_ZB_HA_SIMPLE_SENSOR_DEVICE_ID` | `SOIL_MOISTURE` measurement | Sensor 4 |
+| 1 | `ESP_ZB_HA_SIMPLE_SENSOR_DEVICE_ID` | `REL_HUMIDITY_MEASUREMENT` (0x0405) | Sensor 1 |
+| 2 | `ESP_ZB_HA_SIMPLE_SENSOR_DEVICE_ID` | `REL_HUMIDITY_MEASUREMENT` (0x0405) | Sensor 2 |
+| 3 | `ESP_ZB_HA_SIMPLE_SENSOR_DEVICE_ID` | `REL_HUMIDITY_MEASUREMENT` (0x0405) | Sensor 3 |
+| 4 | `ESP_ZB_HA_SIMPLE_SENSOR_DEVICE_ID` | `REL_HUMIDITY_MEASUREMENT` (0x0405) | Sensor 4 |
 | 5 | `ESP_ZB_HA_ON_OFF_OUTPUT_DEVICE_ID` | `ON_OFF` + `LEVEL_CONTROL` | Pump (PWM duty) |
 
-- Moisture sensors report `MeasuredValue` (uint16, scaled 0–10000 = 0–100%) via the
-  **Soil Moisture Measurement cluster** (cluster ID `0x0408`).
+- Moisture sensors use the **Relative Humidity Measurement cluster** (`0x0405`) — same wire
+  format as Soil Moisture (0x0408, not in SDK 1.6.0): `MeasuredValue` uint16, 0–10000 = 0–100%.
+  Home Assistant recognises this cluster natively.
 - The pump endpoint uses **Level Control cluster** (`0x0008`); `CurrentLevel` (0–254) maps
   linearly to PWM duty cycle (0–100%). `ON_OFF` cluster controls pump on/off.
 

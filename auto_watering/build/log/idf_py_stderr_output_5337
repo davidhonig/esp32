@@ -1,0 +1,2 @@
+Command: cmake -G Ninja -DPYTHON_DEPS_CHECKED=1 -DPYTHON=/Users/david/.espressif/tools/python/v5.5.3/venv/bin/python -DESP_PLATFORM=1 -DIDF_TARGET=esp32h2 -DCCACHE_ENABLE=0 /Users/david/workspace/github.com/davidhonig/esp32/auto_watering
+2c211b23-842e6b6-1.6.4-2026-04-12 08:00:45 UTC

@@ -171,9 +171,9 @@ static void sensor_poll_task(void *arg)
             esp_zb_lock_acquire(portMAX_DELAY);
             esp_zb_zcl_set_attribute_val(
                 (uint8_t)(SENSOR_ENDPOINT_BASE + i),
-                ESP_ZB_ZCL_CLUSTER_ID_SOIL_MOISTURE,
+                ESP_ZB_ZCL_CLUSTER_ID_REL_HUMIDITY_MEASUREMENT,
                 ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
-                ESP_ZB_ZCL_ATTR_SOIL_MOISTURE_VALUE_ID,
+                ESP_ZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_VALUE_ID,
                 &moisture,
                 false);
             esp_zb_lock_release();
@@ -205,13 +205,16 @@ static void add_moisture_endpoint(esp_zb_ep_list_t *ep_list, uint8_t ep_id)
         cluster_list, esp_zb_identify_cluster_create(&identify_cfg),
         ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
 
-    esp_zb_soil_moisture_meas_cfg_t moisture_cfg = {
+    /* Relative Humidity Measurement cluster (0x0405) used as soil moisture.
+     * Same wire format: 0-10000 = 0-100%.  Home Assistant maps this to a
+     * moisture sensor when the endpoint description says "soil". */
+    esp_zb_humidity_meas_cluster_cfg_t moisture_cfg = {
         .measured_value = 0,
         .min_value      = 0,
         .max_value      = 10000,
     };
-    esp_zb_cluster_list_add_soil_moisture_meas_cluster(
-        cluster_list, esp_zb_soil_moisture_meas_cluster_create(&moisture_cfg),
+    esp_zb_cluster_list_add_humidity_meas_cluster(
+        cluster_list, esp_zb_humidity_meas_cluster_create(&moisture_cfg),
         ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
 
     /* Endpoint config ──────────────────────────────────────────────────── */
