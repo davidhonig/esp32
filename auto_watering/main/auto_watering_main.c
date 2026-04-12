@@ -2,7 +2,7 @@
  * auto_watering_main.c
  *
  * Zigbee End Device exposing:
- *   Endpoints 1-4 : Soil Moisture Measurement (cluster 0x0408)
+ *   Endpoints 1-4 : Relative Humidity Measurement (0x0405) used for soil moisture
  *   Endpoint  5   : Water Pump – ON/OFF (0x0006) + Level Control (0x0008)
  *
  * Board: Waveshare ESP32-H2-Zero
@@ -15,6 +15,7 @@
 #include "nvs_flash.h"
 #include "ha/esp_zigbee_ha_standard.h"
 #include "esp_zigbee_cluster.h"
+#include "zcl/esp_zigbee_zcl_command.h"
 
 #include "auto_watering.h"
 #include "moisture_sensor.h"
@@ -29,6 +30,27 @@ static const char *TAG = "AUTO_WATERING";
 /* ── Forward declarations ──────────────────────────────────────────────── */
 static void add_moisture_endpoint(esp_zb_ep_list_t *ep_list, uint8_t ep_id);
 static void add_pump_endpoint(esp_zb_ep_list_t *ep_list, uint8_t ep_id);
+
+static void report_moisture_value(uint8_t endpoint)
+{
+    esp_zb_zcl_report_attr_cmd_t report = {
+        .zcl_basic_cmd = {
+            .dst_addr_u.addr_short = 0x0000,
+            .dst_endpoint = 0,
+            .src_endpoint = endpoint,
+        },
+        .address_mode = ESP_ZB_APS_ADDR_MODE_DST_ADDR_ENDP_NOT_PRESENT,
+        .clusterID = ESP_ZB_ZCL_CLUSTER_ID_REL_HUMIDITY_MEASUREMENT,
+        .attributeID = ESP_ZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_VALUE_ID,
+        .direction = ESP_ZB_ZCL_CMD_DIRECTION_TO_CLI,
+        .manuf_code = ESP_ZB_ZCL_ATTR_NON_MANUFACTURER_SPECIFIC,
+    };
+
+    esp_err_t err = esp_zb_zcl_report_attr_cmd_req(&report);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Humidity report request failed for ep %u: %s", endpoint, esp_err_to_name(err));
+    }
+}
 
 /* ─────────────────────────────────────────────────────────────────────── */
 /*  Zigbee signal handler                                                  */
@@ -176,6 +198,7 @@ static void sensor_poll_task(void *arg)
                 ESP_ZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_VALUE_ID,
                 &moisture,
                 false);
+            report_moisture_value((uint8_t)(SENSOR_ENDPOINT_BASE + i));
             esp_zb_lock_release();
         }
 
