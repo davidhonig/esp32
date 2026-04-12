@@ -28,7 +28,7 @@ PORT     ?= $(firstword $(wildcard /dev/cu.usbserial-* /dev/cu.SLAB_USBtoUART \
 BAUD     ?= 115200
 
 IDF_PY   := idf.py
-ifdef PORT
+ifneq ($(strip $(PORT)),)
   PORT_ARG := -p $(PORT)
 endif
 
