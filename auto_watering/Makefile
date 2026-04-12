@@ -21,10 +21,11 @@ RUN := . '$(IDF_ACTIVATE)' && export IDF_TARGET=$(TARGET) &&
 # ── Target chip ────────────────────────────────────────────────────────────
 TARGET   ?= esp32h2
 
-# ── Serial port (macOS: cu.usbserial-*, Linux: ttyUSB0 / ttyACM0) ─────────
+# ── Serial port (macOS: cu.usbserial-* / cu.usbmodem*, Linux: ttyUSB0 / ttyACM0) ──
 #    AUTO-DETECT: first USB-serial port found; override with PORT=...
-PORT     ?= $(firstword $(wildcard /dev/cu.usbserial-* /dev/cu.SLAB_USBtoUART \
-                                   /dev/ttyUSB0 /dev/ttyACM0))
+#    Waveshare / ESP USB CDC often shows up as /dev/cu.usbmodem*
+PORT     ?= $(firstword $(wildcard /dev/cu.usbserial-* /dev/cu.usbmodem* /dev/tty.usbmodem* /dev/cu.SLAB_USBtoUART \
+                                    /dev/ttyUSB0 /dev/ttyACM0))
 BAUD     ?= 115200
 
 IDF_PY   := idf.py
