@@ -27,7 +27,7 @@ void pump_driver_set_power(bool on);
 /**
  * @brief Set the pump speed level.
  *
- * @param level  ZCL CurrentLevel value 0-254; maps linearly to PWM duty 0-255.
+ * @param level  Raw PWM duty value used by LEDC.
  */
 void pump_driver_set_level(uint8_t level);
 

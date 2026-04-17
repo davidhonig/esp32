@@ -4,6 +4,7 @@
  * Zigbee End Device exposing:
  *   Endpoints 1-4 : Relative Humidity Measurement (0x0405) used for soil moisture
  *   Endpoint  5   : Water Pump – ON/OFF (0x0006) + Level Control (0x0008)
+ *                    + Analog Output (0x000d) for run duration setting
  *
  * Board: Waveshare ESP32-H2-Zero
  */
@@ -19,6 +20,7 @@
 #include "esp_zigbee_cluster.h"
 #include "zcl/esp_zigbee_zcl_on_off.h"
 #include "zcl/esp_zigbee_zcl_command.h"
+#include "zcl/esp_zigbee_zcl_analog_output.h"
 #include "zcl/esp_zigbee_zcl_level.h"
 
 #include "auto_watering.h"
@@ -32,12 +34,26 @@
 static const char *TAG = "AUTO_WATERING";
 static uint8_t s_pump_level_attr = 0;
 static bool s_pump_on_off_attr = false;
+static float s_pump_run_duration_ds_attr = (float)PUMP_RUN_DURATION_SETTING_DEFAULT_DS;
+static float s_pump_run_duration_min_attr = 1.0f;
+static float s_pump_run_duration_max_attr = (float)PUMP_RUN_DURATION_SETTING_MAX_DS;
 
 static TaskHandle_t s_button_task_handle;
 
 /* ── Forward declarations ──────────────────────────────────────────────── */
 static void add_moisture_endpoint(esp_zb_ep_list_t *ep_list, uint8_t ep_id);
 static void add_pump_endpoint(esp_zb_ep_list_t *ep_list, uint8_t ep_id);
+static void pump_auto_off_zb_cb(uint8_t param);
+static void pump_report_snapshot_zb_cb(uint8_t param);
+static void sync_pump_run_duration_from_attribute(void);
+static void pump_schedule_auto_off(void);
+static void pump_cancel_auto_off(void);
+static void log_periodic_snapshot_payload(const uint16_t moisture_values[NUM_SENSORS]);
+static void report_pump_snapshot(void);
+static void report_periodic_snapshot(const uint16_t moisture_values[NUM_SENSORS]);
+static void report_pump_level_value(void);
+static void report_pump_on_off_value(void);
+static void report_pump_run_duration_value(void);
 
 /* ── Boot button ───────────────────────────────────────────────────────── */
 
@@ -88,6 +104,47 @@ static uint8_t pump_level_to_pwm(uint8_t level)
                                 PUMP_LEVEL_ZCL_MAX));
 }
 
+static float normalize_pump_run_duration_ds(float value)
+{
+    if (value < s_pump_run_duration_min_attr) {
+        value = s_pump_run_duration_min_attr;
+    }
+    if (value > s_pump_run_duration_max_attr) {
+        value = s_pump_run_duration_max_attr;
+    }
+    return (float)((uint8_t)(value + 0.5f));
+}
+
+static uint32_t pump_run_duration_ms(void)
+{
+    return (uint32_t)normalize_pump_run_duration_ds(s_pump_run_duration_ds_attr) * 100U;
+}
+
+static void sync_pump_run_duration_from_attribute(void)
+{
+    esp_zb_zcl_attr_t *duration_attr = esp_zb_zcl_get_attribute(
+        PUMP_ENDPOINT,
+        ESP_ZB_ZCL_CLUSTER_ID_ANALOG_OUTPUT,
+        ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+        ESP_ZB_ZCL_ATTR_ANALOG_OUTPUT_PRESENT_VALUE_ID);
+
+    if (!duration_attr || !duration_attr->data_p) {
+        return;
+    }
+
+    float duration_ds = normalize_pump_run_duration_ds(*(float *)duration_attr->data_p);
+    if (duration_ds != s_pump_run_duration_ds_attr) {
+        s_pump_run_duration_ds_attr = duration_ds;
+        esp_zb_zcl_set_attribute_val(
+            PUMP_ENDPOINT,
+            ESP_ZB_ZCL_CLUSTER_ID_ANALOG_OUTPUT,
+            ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+            ESP_ZB_ZCL_ATTR_ANALOG_OUTPUT_PRESENT_VALUE_ID,
+            &s_pump_run_duration_ds_attr,
+            false);
+    }
+}
+
 static esp_zb_attribute_list_t *create_basic_cluster(void)
 {
     esp_zb_basic_cluster_cfg_t basic_cfg = {
@@ -102,7 +159,7 @@ static esp_zb_attribute_list_t *create_basic_cluster(void)
     return basic_cluster;
 }
 
-static void report_moisture_value(uint8_t endpoint)
+static void report_moisture_value(uint8_t endpoint, uint16_t moisture)
 {
     esp_zb_zcl_report_attr_cmd_t report = {
         .zcl_basic_cmd = {
@@ -121,6 +178,142 @@ static void report_moisture_value(uint8_t endpoint)
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Humidity report request failed for ep %u: %s", endpoint, esp_err_to_name(err));
     }
+}
+
+static void report_pump_run_duration_value(void)
+{
+    esp_zb_zcl_report_attr_cmd_t report = {
+        .zcl_basic_cmd = {
+            .dst_addr_u.addr_short = 0x0000,
+            .dst_endpoint = 0,
+            .src_endpoint = PUMP_ENDPOINT,
+        },
+        .address_mode = ESP_ZB_APS_ADDR_MODE_DST_ADDR_ENDP_NOT_PRESENT,
+        .clusterID = ESP_ZB_ZCL_CLUSTER_ID_ANALOG_OUTPUT,
+        .attributeID = ESP_ZB_ZCL_ATTR_ANALOG_OUTPUT_PRESENT_VALUE_ID,
+        .direction = ESP_ZB_ZCL_CMD_DIRECTION_TO_CLI,
+        .manuf_code = ESP_ZB_ZCL_ATTR_NON_MANUFACTURER_SPECIFIC,
+    };
+
+    esp_err_t err = esp_zb_zcl_report_attr_cmd_req(&report);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Pump duration report request failed: %s", esp_err_to_name(err));
+    }
+}
+
+static void report_pump_on_off_value(void)
+{
+    esp_zb_zcl_report_attr_cmd_t report = {
+        .zcl_basic_cmd = {
+            .dst_addr_u.addr_short = 0x0000,
+            .dst_endpoint = 0,
+            .src_endpoint = PUMP_ENDPOINT,
+        },
+        .address_mode = ESP_ZB_APS_ADDR_MODE_DST_ADDR_ENDP_NOT_PRESENT,
+        .clusterID = ESP_ZB_ZCL_CLUSTER_ID_ON_OFF,
+        .attributeID = ESP_ZB_ZCL_ATTR_ON_OFF_ON_OFF_ID,
+        .direction = ESP_ZB_ZCL_CMD_DIRECTION_TO_CLI,
+        .manuf_code = ESP_ZB_ZCL_ATTR_NON_MANUFACTURER_SPECIFIC,
+    };
+
+    esp_err_t err = esp_zb_zcl_report_attr_cmd_req(&report);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Pump on/off report request failed: %s", esp_err_to_name(err));
+    }
+}
+
+static void report_pump_level_value(void)
+{
+    esp_zb_zcl_report_attr_cmd_t report = {
+        .zcl_basic_cmd = {
+            .dst_addr_u.addr_short = 0x0000,
+            .dst_endpoint = 0,
+            .src_endpoint = PUMP_ENDPOINT,
+        },
+        .address_mode = ESP_ZB_APS_ADDR_MODE_DST_ADDR_ENDP_NOT_PRESENT,
+        .clusterID = ESP_ZB_ZCL_CLUSTER_ID_LEVEL_CONTROL,
+        .attributeID = ESP_ZB_ZCL_ATTR_LEVEL_CONTROL_CURRENT_LEVEL_ID,
+        .direction = ESP_ZB_ZCL_CMD_DIRECTION_TO_CLI,
+        .manuf_code = ESP_ZB_ZCL_ATTR_NON_MANUFACTURER_SPECIFIC,
+    };
+
+    esp_err_t err = esp_zb_zcl_report_attr_cmd_req(&report);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Pump level report request failed: %s", esp_err_to_name(err));
+    }
+}
+
+static void log_periodic_snapshot_payload(const uint16_t moisture_values[NUM_SENSORS])
+{
+    ESP_LOGI(TAG,
+             "Zigbee snapshot payload: {\"humidity_1\":%.2f,\"humidity_2\":%.2f,"
+             "\"humidity_3\":%.2f,\"humidity_4\":%.2f,\"state_5\":\"%s\","
+             "\"level_5\":%u,\"analog_output_5\":%.0f}",
+             moisture_values[0] / 100.0f,
+             moisture_values[1] / 100.0f,
+             moisture_values[2] / 100.0f,
+             moisture_values[3] / 100.0f,
+             s_pump_on_off_attr ? "ON" : "OFF",
+              s_pump_level_attr,
+              (double)s_pump_run_duration_ds_attr);
+}
+
+static void report_pump_snapshot(void)
+{
+    report_pump_on_off_value();
+    report_pump_level_value();
+    report_pump_run_duration_value();
+}
+
+static void report_periodic_snapshot(const uint16_t moisture_values[NUM_SENSORS])
+{
+    log_periodic_snapshot_payload(moisture_values);
+    for (int i = 0; i < NUM_SENSORS; i++) {
+        report_moisture_value((uint8_t)(SENSOR_ENDPOINT_BASE + i), moisture_values[i]);
+    }
+    report_pump_snapshot();
+}
+
+static void pump_cancel_auto_off(void)
+{
+    esp_zb_scheduler_alarm_cancel(pump_auto_off_zb_cb, 0);
+}
+
+static void pump_schedule_auto_off(void)
+{
+    sync_pump_run_duration_from_attribute();
+    uint32_t duration_ms = pump_run_duration_ms();
+
+    pump_cancel_auto_off();
+    esp_zb_scheduler_alarm(pump_auto_off_zb_cb, 0, duration_ms);
+
+    ESP_LOGI(TAG, "Pump auto-off in %.1f s (%.0f ds)",
+             (double)(duration_ms / 1000.0f),
+             (double)s_pump_run_duration_ds_attr);
+}
+
+static void pump_auto_off_zb_cb(uint8_t param)
+{
+    (void)param;
+
+    s_pump_on_off_attr = false;
+    pump_driver_set_power(false);
+
+    esp_zb_zcl_set_attribute_val(
+        PUMP_ENDPOINT,
+        ESP_ZB_ZCL_CLUSTER_ID_ON_OFF,
+        ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+        ESP_ZB_ZCL_ATTR_ON_OFF_ON_OFF_ID,
+        &s_pump_on_off_attr,
+        false);
+    report_pump_snapshot();
+    ESP_LOGI(TAG, "Pump auto-off complete");
+}
+
+static void pump_report_snapshot_zb_cb(uint8_t param)
+{
+    (void)param;
+    report_pump_snapshot();
 }
 
 /* ─────────────────────────────────────────────────────────────────────── */
@@ -174,6 +367,7 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct)
                      extended_pan_id[1], extended_pan_id[0],
                      esp_zb_get_pan_id(), esp_zb_get_current_channel(),
                      esp_zb_get_short_address());
+            esp_zb_scheduler_alarm(pump_report_snapshot_zb_cb, 0, 1000);
         } else {
             ESP_LOGI(TAG, "Network steering not successful (status: %s)",
                      esp_err_to_name(err_status));
@@ -222,9 +416,35 @@ static esp_err_t zb_attribute_handler(const esp_zb_zcl_set_attr_value_message_t 
             message->attribute.data.type == ESP_ZB_ZCL_ATTR_TYPE_BOOL) {
             bool on = message->attribute.data.value
                       ? *(bool *)message->attribute.data.value : false;
+
+            if (on && s_pump_level_attr == 0) {
+                s_pump_level_attr = 1;
+                esp_zb_zcl_set_attribute_val(
+                    PUMP_ENDPOINT,
+                    ESP_ZB_ZCL_CLUSTER_ID_LEVEL_CONTROL,
+                    ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+                    ESP_ZB_ZCL_ATTR_LEVEL_CONTROL_CURRENT_LEVEL_ID,
+                    &s_pump_level_attr,
+                    false);
+                pump_driver_set_level(pump_level_to_pwm(s_pump_level_attr));
+            }
+
             s_pump_on_off_attr = on;
+            esp_zb_zcl_set_attribute_val(
+                PUMP_ENDPOINT,
+                ESP_ZB_ZCL_CLUSTER_ID_ON_OFF,
+                ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+                ESP_ZB_ZCL_ATTR_ON_OFF_ON_OFF_ID,
+                &s_pump_on_off_attr,
+                false);
             ESP_LOGI(TAG, "Pump → %s", on ? "ON" : "OFF");
             pump_driver_set_power(on);
+            if (on) {
+                pump_schedule_auto_off();
+            } else {
+                pump_cancel_auto_off();
+            }
+            report_pump_snapshot();
         }
 
     /* ── Endpoint 5: Pump speed (Level Control) ──────────────────────── */
@@ -238,6 +458,32 @@ static esp_err_t zb_attribute_handler(const esp_zb_zcl_set_attr_value_message_t 
             uint8_t pwm_level = pump_level_to_pwm(level);
             ESP_LOGI(TAG, "Pump level %u/254 -> PWM=%u", level, pwm_level);
             pump_driver_set_level(pwm_level);
+            report_pump_snapshot();
+        }
+
+    /* ── Endpoint 5: Pump run duration (Analog Output, deciseconds) ───── */
+    } else if (message->info.dst_endpoint == PUMP_ENDPOINT &&
+               message->info.cluster == ESP_ZB_ZCL_CLUSTER_ID_ANALOG_OUTPUT) {
+        if (message->attribute.id == ESP_ZB_ZCL_ATTR_ANALOG_OUTPUT_PRESENT_VALUE_ID &&
+            message->attribute.data.type == ESP_ZB_ZCL_ATTR_TYPE_SINGLE) {
+            float value = message->attribute.data.value
+                          ? *(float *)message->attribute.data.value
+                          : s_pump_run_duration_ds_attr;
+            s_pump_run_duration_ds_attr = normalize_pump_run_duration_ds(value);
+            esp_zb_zcl_set_attribute_val(
+                PUMP_ENDPOINT,
+                ESP_ZB_ZCL_CLUSTER_ID_ANALOG_OUTPUT,
+                ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+                ESP_ZB_ZCL_ATTR_ANALOG_OUTPUT_PRESENT_VALUE_ID,
+                &s_pump_run_duration_ds_attr,
+                false);
+            ESP_LOGI(TAG, "Pump run duration %.0f ds (%.1f s)",
+                     (double)s_pump_run_duration_ds_attr,
+                     (double)(s_pump_run_duration_ds_attr / 10.0f));
+            if (s_pump_on_off_attr) {
+                pump_schedule_auto_off();
+            }
+            report_pump_snapshot();
         }
 
     }
@@ -269,27 +515,31 @@ static esp_err_t zb_action_handler(esp_zb_core_action_callback_id_t callback_id,
 
 static void sensor_poll_task(void *arg)
 {
+    uint16_t moisture_values[NUM_SENSORS] = {0};
+
     /* Small delay so the Zigbee stack has time to finish booting */
     vTaskDelay(pdMS_TO_TICKS(5000));
 
     while (1) {
         for (int i = 0; i < NUM_SENSORS; i++) {
-            uint16_t moisture = moisture_sensor_read(i);
-            ESP_LOGI(TAG, "Sensor %d moisture: %u/10000", i + 1, moisture);
+            moisture_values[i] = moisture_sensor_read(i);
+            ESP_LOGI(TAG, "Sensor %d moisture: %u/10000", i + 1, moisture_values[i]);
+        }
 
-            /* Update attribute inside Zigbee stack lock so the stack can
-             * safely report the new value to a bound coordinator. */
-            esp_zb_lock_acquire(portMAX_DELAY);
+        /* Update all endpoint attributes first, then send reports in one burst
+         * so the coordinator receives a tighter grouped snapshot. */
+        esp_zb_lock_acquire(portMAX_DELAY);
+        for (int i = 0; i < NUM_SENSORS; i++) {
             esp_zb_zcl_set_attribute_val(
                 (uint8_t)(SENSOR_ENDPOINT_BASE + i),
                 ESP_ZB_ZCL_CLUSTER_ID_REL_HUMIDITY_MEASUREMENT,
                 ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
                 ESP_ZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_VALUE_ID,
-                &moisture,
+                &moisture_values[i],
                 false);
-            report_moisture_value((uint8_t)(SENSOR_ENDPOINT_BASE + i));
-            esp_zb_lock_release();
         }
+        report_periodic_snapshot(moisture_values);
+        esp_zb_lock_release();
 
         vTaskDelay(pdMS_TO_TICKS(SENSOR_POLL_INTERVAL_MS));
     }
@@ -343,13 +593,32 @@ static void add_pump_endpoint(esp_zb_ep_list_t *ep_list, uint8_t ep_id)
         ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
 
     esp_zb_on_off_cluster_cfg_t on_off_cfg = { .on_off = s_pump_on_off_attr };
+    esp_zb_attribute_list_t *on_off_cluster = esp_zb_on_off_cluster_create(&on_off_cfg);
     esp_zb_cluster_list_add_on_off_cluster(
-        cluster_list, esp_zb_on_off_cluster_create(&on_off_cfg),
+        cluster_list, on_off_cluster,
         ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
 
     esp_zb_level_cluster_cfg_t level_cfg = { .current_level = s_pump_level_attr };
     esp_zb_cluster_list_add_level_cluster(
         cluster_list, esp_zb_level_cluster_create(&level_cfg),
+        ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
+
+    esp_zb_analog_output_cluster_cfg_t duration_cfg = {
+        .out_of_service = true,
+        .present_value  = s_pump_run_duration_ds_attr,
+        .status_flags   = 0,
+    };
+    esp_zb_attribute_list_t *duration_cluster = esp_zb_analog_output_cluster_create(&duration_cfg);
+    ESP_ERROR_CHECK(esp_zb_analog_output_cluster_add_attr(
+        duration_cluster,
+        ESP_ZB_ZCL_ATTR_ANALOG_OUTPUT_MIN_PRESENT_VALUE_ID,
+        &s_pump_run_duration_min_attr));
+    ESP_ERROR_CHECK(esp_zb_analog_output_cluster_add_attr(
+        duration_cluster,
+        ESP_ZB_ZCL_ATTR_ANALOG_OUTPUT_MAX_PRESENT_VALUE_ID,
+        &s_pump_run_duration_max_attr));
+    esp_zb_cluster_list_add_analog_output_cluster(
+        cluster_list, duration_cluster,
         ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
 
     /* Endpoint config ──────────────────────────────────────────────────── */

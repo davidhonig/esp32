@@ -11,7 +11,7 @@
 
 - **Framework:** [ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/latest/) v5.0+
 - **Build system:** CMake via `idf.py`
-- **Zigbee stack:** `espressif/esp-zigbee-lib ~1.6.0` + `espressif/esp-zboss-lib ~1.6.0`
+- **Zigbee stack:** `espressif/esp-zigbee-lib ~1.6.0` + `espressif/esp-zboss-lib ~1.6.0` [DOC](https://docs.espressif.com/projects/esp-zigbee-sdk/en/latest/esp32/user-guide/index.html)
 - **Component manifest:** `main/idf_component.yml` per project
 - **Menuconfig flag required:** `ZB_ED_ROLE` must be defined for End Device role
 
@@ -50,7 +50,7 @@ Each physical device is represented as a **separate Zigbee endpoint** on one nod
 | 2 | `ESP_ZB_HA_SIMPLE_SENSOR_DEVICE_ID` | `SOIL_MOISTURE` measurement | Sensor 2 |
 | 3 | `ESP_ZB_HA_SIMPLE_SENSOR_DEVICE_ID` | `SOIL_MOISTURE` measurement | Sensor 3 |
 | 4 | `ESP_ZB_HA_SIMPLE_SENSOR_DEVICE_ID` | `SOIL_MOISTURE` measurement | Sensor 4 |
-| 5 | `ESP_ZB_HA_ON_OFF_OUTPUT_DEVICE_ID` | `ON_OFF` + `LEVEL_CONTROL` | Pump (PWM duty) |
+| 5 | `ESP_ZB_HA_ON_OFF_OUTPUT_DEVICE_ID` | `ON_OFF` + `LEVEL_CONTROL` + ` | Pump (PWM duty) |
 
 - Moisture sensors report `MeasuredValue` (uint16, scaled 0–10000 = 0–100%) via the
   **Soil Moisture Measurement cluster** (cluster ID `0x0408`).
