@@ -10,13 +10,16 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "driver/gpio.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "esp_zigbee_attribute.h"
 #include "ha/esp_zigbee_ha_standard.h"
 #include "esp_zigbee_cluster.h"
+#include "zcl/esp_zigbee_zcl_on_off.h"
 #include "zcl/esp_zigbee_zcl_command.h"
+#include "zcl/esp_zigbee_zcl_level.h"
 
 #include "auto_watering.h"
 #include "moisture_sensor.h"
@@ -27,10 +30,63 @@
 #endif
 
 static const char *TAG = "AUTO_WATERING";
+static uint8_t s_pump_level_attr = 0;
+static bool s_pump_on_off_attr = false;
+
+static TaskHandle_t s_button_task_handle;
 
 /* ── Forward declarations ──────────────────────────────────────────────── */
 static void add_moisture_endpoint(esp_zb_ep_list_t *ep_list, uint8_t ep_id);
 static void add_pump_endpoint(esp_zb_ep_list_t *ep_list, uint8_t ep_id);
+
+/* ── Boot button ───────────────────────────────────────────────────────── */
+
+static void IRAM_ATTR boot_button_isr(void *arg)
+{
+    BaseType_t higher_prio_woken = pdFALSE;
+    vTaskNotifyGiveFromISR(s_button_task_handle, &higher_prio_woken);
+    portYIELD_FROM_ISR(higher_prio_woken);
+}
+
+static void button_task(void *pvParameters)
+{
+    while (1) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);   /* wait for ISR */
+        vTaskDelay(pdMS_TO_TICKS(50));             /* debounce */
+        if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
+            ESP_LOGI(TAG, "BOOT button pressed – factory reset and rejoin");
+            esp_zb_factory_reset();
+        }
+    }
+}
+
+static esp_err_t boot_button_init(void)
+{
+    gpio_config_t io_conf = {
+        .pin_bit_mask  = 1ULL << BOOT_BUTTON_GPIO,
+        .mode          = GPIO_MODE_INPUT,
+        .pull_up_en    = GPIO_PULLUP_ENABLE,
+        .pull_down_en  = GPIO_PULLDOWN_DISABLE,
+        .intr_type     = GPIO_INTR_NEGEDGE,
+    };
+    ESP_RETURN_ON_ERROR(gpio_config(&io_conf), TAG, "Boot button GPIO config failed");
+    ESP_RETURN_ON_ERROR(gpio_install_isr_service(0), TAG, "GPIO ISR service install failed");
+    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(BOOT_BUTTON_GPIO, boot_button_isr, NULL),
+                        TAG, "Boot button ISR handler add failed");
+    return ESP_OK;
+}
+
+static uint8_t pump_level_to_pwm(uint8_t level)
+{
+    if (level == 0) {
+        return 0;
+    }
+
+    uint16_t pwm_span = (uint16_t)(PUMP_LEVEL_PWM_MAX - PUMP_LEVEL_PWM_MIN);
+    return (uint8_t)(PUMP_LEVEL_PWM_MIN +
+                     (uint16_t)(((uint16_t)level * pwm_span + (PUMP_LEVEL_ZCL_MAX / 2U)) /
+                                PUMP_LEVEL_ZCL_MAX));
+}
 
 static esp_zb_attribute_list_t *create_basic_cluster(void)
 {
@@ -127,6 +183,11 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct)
         }
         break;
 
+    case ESP_ZB_ZDO_SIGNAL_LEAVE:
+    case ESP_ZB_ZDO_SIGNAL_LEAVE_INDICATION:
+        ESP_LOGI(TAG, "Left Zigbee network");
+        break;
+
     default:
         ESP_LOGI(TAG, "ZDO signal: %s (0x%x), status: %s",
                  esp_zb_zdo_signal_to_string(sig_type), sig_type,
@@ -154,21 +215,31 @@ static esp_err_t zb_attribute_handler(const esp_zb_zcl_set_attr_value_message_t 
         return ESP_OK;   /* sensor endpoints are read-only */
     }
 
-    if (message->info.cluster == ESP_ZB_ZCL_CLUSTER_ID_ON_OFF) {
+    /* ── Endpoint 5: Pump ON/OFF ─────────────────────────────────────── */
+    if (message->info.dst_endpoint == PUMP_ENDPOINT &&
+        message->info.cluster == ESP_ZB_ZCL_CLUSTER_ID_ON_OFF) {
         if (message->attribute.id == ESP_ZB_ZCL_ATTR_ON_OFF_ON_OFF_ID &&
             message->attribute.data.type == ESP_ZB_ZCL_ATTR_TYPE_BOOL) {
             bool on = message->attribute.data.value
                       ? *(bool *)message->attribute.data.value : false;
+            s_pump_on_off_attr = on;
             ESP_LOGI(TAG, "Pump → %s", on ? "ON" : "OFF");
             pump_driver_set_power(on);
         }
-    } else if (message->info.cluster == ESP_ZB_ZCL_CLUSTER_ID_LEVEL_CONTROL) {
-        if (message->attribute.id == ESP_ZB_ZCL_ATTR_LEVEL_CONTROL_CURRENT_LEVEL_ID) {
+
+    /* ── Endpoint 5: Pump speed (Level Control) ──────────────────────── */
+    } else if (message->info.dst_endpoint == PUMP_ENDPOINT &&
+               message->info.cluster == ESP_ZB_ZCL_CLUSTER_ID_LEVEL_CONTROL) {
+        if (message->attribute.id == ESP_ZB_ZCL_ATTR_LEVEL_CONTROL_CURRENT_LEVEL_ID &&
+            message->attribute.data.type == ESP_ZB_ZCL_ATTR_TYPE_U8) {
             uint8_t level = message->attribute.data.value
                             ? *(uint8_t *)message->attribute.data.value : 0;
-            ESP_LOGI(TAG, "Pump level → %d/254", level);
-            pump_driver_set_level(level);
+            s_pump_level_attr = level;
+            uint8_t pwm_level = pump_level_to_pwm(level);
+            ESP_LOGI(TAG, "Pump level %u/254 -> PWM=%u", level, pwm_level);
+            pump_driver_set_level(pwm_level);
         }
+
     }
 
     return ESP_OK;
@@ -271,17 +342,12 @@ static void add_pump_endpoint(esp_zb_ep_list_t *ep_list, uint8_t ep_id)
         cluster_list, create_basic_cluster(),
         ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
 
-    esp_zb_identify_cluster_cfg_t identify_cfg = { .identify_time = 0 };
-    esp_zb_cluster_list_add_identify_cluster(
-        cluster_list, esp_zb_identify_cluster_create(&identify_cfg),
-        ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
-
-    esp_zb_on_off_cluster_cfg_t on_off_cfg = { .on_off = false };
+    esp_zb_on_off_cluster_cfg_t on_off_cfg = { .on_off = s_pump_on_off_attr };
     esp_zb_cluster_list_add_on_off_cluster(
         cluster_list, esp_zb_on_off_cluster_create(&on_off_cfg),
         ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
 
-    esp_zb_level_cluster_cfg_t level_cfg = { .current_level = 0 };
+    esp_zb_level_cluster_cfg_t level_cfg = { .current_level = s_pump_level_attr };
     esp_zb_cluster_list_add_level_cluster(
         cluster_list, esp_zb_level_cluster_create(&level_cfg),
         ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
@@ -336,6 +402,9 @@ void app_main(void)
 
     ESP_ERROR_CHECK(moisture_sensor_init());
     ESP_ERROR_CHECK(pump_driver_init());
+
+    xTaskCreate(button_task, "button_task", 2048, NULL, 6, &s_button_task_handle);
+    ESP_ERROR_CHECK(boot_button_init());
 
     /* Zigbee stack task (priority 5, 4 kB stack – same as reference) */
     xTaskCreate(esp_zb_task,      "Zigbee_main",  4096, NULL, 5, NULL);
